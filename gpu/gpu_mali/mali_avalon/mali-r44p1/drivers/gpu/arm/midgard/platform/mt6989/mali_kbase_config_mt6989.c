@@ -474,7 +474,7 @@ void mtk_platform_cpu_cache_request(struct kbase_device *kbdev, int request)
 				0, 0, 0, 0, 0, &res);
 			gIsDsuRequested++;
 		}
-		else
+		else if (kbdev->gpu_props.props.raw_props.coherency_mode == COHERENCY_ACE_LITE)
 		{
 			KBASE_PLATFORM_LOGE("%s Duplicated request to DSU power on\n", __func__);
 		}
@@ -492,7 +492,7 @@ void mtk_platform_cpu_cache_request(struct kbase_device *kbdev, int request)
 				0, 0, 0, 0, 0, &res);
 			gIsDsuRequested--;
 		}
-		else
+		else if (kbdev->gpu_props.props.raw_props.coherency_mode == COHERENCY_ACE_LITE)
 		{
 			KBASE_PLATFORM_LOGE("%s Duplicated request to DSU power off\n", __func__);
 		}
