@@ -7375,7 +7375,7 @@ static int scheduler_wait_mcu_active(struct kbase_device *kbdev, bool killable_w
 		spin_lock_irqsave(&kbdev->hwaccess_lock, flags);
 #ifdef CONFIG_MALI_MTK_DEBUG
 		if (kbdev->pm.backend.mcu_state != KBASE_MCU_ON)
-			dev_info(kbdev->dev, "mcu_state: %d != KBASE_MCU_ON", kbdev->pm.backend.mcu_state);
+			dev_vdbg(kbdev->dev, "mcu_state: %d != KBASE_MCU_ON", kbdev->pm.backend.mcu_state);
 #else
 		WARN_ON(kbdev->pm.backend.mcu_state != KBASE_MCU_ON);
 #endif /* CONFIG_MALI_MTK_DEBUG */
