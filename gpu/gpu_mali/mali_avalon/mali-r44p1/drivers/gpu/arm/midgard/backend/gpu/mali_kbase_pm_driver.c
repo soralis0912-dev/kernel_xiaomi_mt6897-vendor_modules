@@ -131,6 +131,9 @@ bool kbase_pm_is_mcu_desired(struct kbase_device *kbdev)
 	if (unlikely(!kbdev->csf.firmware_inited))
 		return false;
 
+	if (kbdev->pm.backend.l2_force_off_after_mcu_halt)
+		return false;
+
 	if (kbdev->csf.scheduler.pm_active_count &&
 	    kbdev->pm.backend.mcu_desired)
 		return true;
@@ -1066,8 +1069,15 @@ static int kbase_pm_mcu_update_state(struct kbase_device *kbdev)
 			break;
 
 		case KBASE_MCU_POWER_DOWN:
-			kbase_csf_firmware_disable_mcu(kbdev);
-			backend->mcu_state = KBASE_MCU_PEND_OFF;
+			if (kbase_hw_has_issue(kbdev, BASE_HW_ISSUE_TITANHW_2922)) {
+				if (!kbdev->csf.firmware_hctl_core_pwr)
+					kbasep_pm_toggle_power_interrupt(kbdev, true);
+				backend->mcu_state = KBASE_MCU_OFF;
+				backend->l2_force_off_after_mcu_halt = true;
+			} else {
+				kbase_csf_firmware_disable_mcu(kbdev);
+				backend->mcu_state = KBASE_MCU_PEND_OFF;
+			}
 			break;
 
 		case KBASE_MCU_PEND_OFF:
@@ -1617,44 +1627,45 @@ static int kbase_pm_l2_update_state(struct kbase_device *kbdev)
 			break;
 
 		case KBASE_L2_PEND_OFF:
-			if (!backend->l2_always_on) {
+			if (likely(!backend->l2_always_on)) {
 				/* We only need to check the L2 here - if the L2
 				 * is off then the tiler is definitely also off.
 				 */
-				if (!l2_trans && !l2_ready) {
-#if MALI_USE_CSF && defined(KBASE_PM_RUNTIME)
-					/* Allow clock gating within the GPU and prevent it
-					 * from being seen as active during sleep.
-					 */
-					kbase_ipa_control_handle_gpu_sleep_enter(kbdev);
+				if (l2_trans || l2_ready)
+					break;
+			} else if (kbdev->cache_clean_in_progress)
+				break;
+#if MALI_USE_CSF
+#if defined(KBASE_PM_RUNTIME)
+			/* Allow clock gating within the GPU and prevent it
+			 * from being seen as active during sleep.
+			 */
+			kbase_ipa_control_handle_gpu_sleep_enter(kbdev);
 #endif
-#if IS_ENABLED(CONFIG_MALI_MTK_ACP_DSU_REQ)
-					mtk_platform_cpu_cache_request(kbdev, REQ_DSU_POWER_OFF);
-#endif /* CONFIG_MALI_MTK_ACP_DSU_REQ */
-					/* L2 is now powered off */
-					backend->l2_state = KBASE_L2_OFF;
-				}
-			} else {
-				if (!kbdev->cache_clean_in_progress) {
-#if MALI_USE_CSF && defined(KBASE_PM_RUNTIME)
-					/* Allow clock gating within the GPU and prevent it
-					 * from being seen as active during sleep.
-					 */
-					kbase_ipa_control_handle_gpu_sleep_enter(kbdev);
-#endif
-#if IS_ENABLED(CONFIG_MALI_MTK_ACP_DSU_REQ)
-					mtk_platform_cpu_cache_request(kbdev, REQ_DSU_POWER_OFF);
-#endif /* CONFIG_MALI_MTK_ACP_DSU_REQ */
-
-					backend->l2_state = KBASE_L2_OFF;
-				}
+			/* Disabling MCU after L2 cache power down is to address
+			 * BASE_HW_ISSUE_TITANHW_2922 hardware issue.
+			 */
+			if (backend->l2_force_off_after_mcu_halt) {
+				kbase_csf_firmware_disable_mcu(kbdev);
+				kbase_csf_firmware_disable_mcu_wait(kbdev);
+				WARN_ON_ONCE(backend->mcu_state != KBASE_MCU_OFF);
+				backend->l2_force_off_after_mcu_halt = false;
 			}
+#endif
+#if IS_ENABLED(CONFIG_MALI_MTK_ACP_DSU_REQ)
+			mtk_platform_cpu_cache_request(kbdev, REQ_DSU_POWER_OFF);
+#endif /* CONFIG_MALI_MTK_ACP_DSU_REQ */
+			backend->l2_state = KBASE_L2_OFF;
 			break;
 
 		case KBASE_L2_RESET_WAIT:
 			/* Reset complete  */
-			if (!backend->in_reset)
+			if (!backend->in_reset) {
+#if MALI_USE_CSF
+				backend->l2_force_off_after_mcu_halt = false;
+#endif
 				backend->l2_state = KBASE_L2_OFF;
+			}
 			break;
 
 		default:
