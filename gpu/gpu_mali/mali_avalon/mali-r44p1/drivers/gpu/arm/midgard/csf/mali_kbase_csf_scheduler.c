@@ -5609,7 +5609,6 @@ static void schedule_actions(struct kbase_device *kbdev, bool is_tick)
 	struct kbase_csf_scheduler *scheduler = &kbdev->csf.scheduler;
 	unsigned long flags;
 	struct kbase_queue_group *protm_grp;
-	int ret;
 	bool skip_scheduling_actions;
 	bool skip_idle_slots_update;
 	bool new_protm_top_grp = false;
@@ -5618,10 +5617,8 @@ static void schedule_actions(struct kbase_device *kbdev, bool is_tick)
 	kbase_reset_gpu_assert_prevented(kbdev);
 	lockdep_assert_held(&scheduler->lock);
 
-	ret = kbase_csf_scheduler_wait_mcu_active(kbdev);
-	if (ret) {
-		dev_err(kbdev->dev,
-			"Wait for MCU power on failed on scheduling tick/tock");
+	if (kbase_csf_scheduler_wait_mcu_active(kbdev)) {
+		dev_err(kbdev->dev, "Wait for MCU power on failed on scheduling tick/tock");
 #if IS_ENABLED(CONFIG_MALI_MTK_LOG_BUFFER)
 		mtk_logbuffer_type_print(kbdev, MTK_LOGBUFFER_TYPE_CRITICAL | MTK_LOGBUFFER_TYPE_EXCEPTION,
 			"Wait for MCU power on failed on scheduling tick/tock\n");
@@ -6225,7 +6222,10 @@ static void firmware_aliveness_monitor(struct work_struct *work)
 		goto exit;
 	}
 
-	kbase_csf_scheduler_wait_mcu_active(kbdev);
+	if (kbase_csf_scheduler_wait_mcu_active(kbdev)) {
+		dev_err(kbdev->dev, "Wait for MCU power on failed at fw aliveness monitor");
+		goto exit;
+	}
 
 	err = kbase_csf_firmware_ping_wait(kbdev, kbdev->csf.fw_timeout_ms);
 
