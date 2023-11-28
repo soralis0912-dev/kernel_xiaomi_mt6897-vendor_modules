@@ -5133,9 +5133,6 @@ static bool scheduler_idle_suspendable(struct kbase_device *kbdev)
 	} else
 		suspend = kbase_pm_no_runnables_sched_suspendable(kbdev);
 
-	if (suspend && unlikely(atomic_read(&scheduler->gpu_no_longer_idle)))
-		suspend = false;
-
 	/* Confirm that all groups are actually idle before proceeding with
 	 * suspension as groups might potentially become active again without
 	 * informing the scheduler in case userspace rings a doorbell directly.
@@ -6727,8 +6724,6 @@ static void check_sync_update_in_sleep_mode(struct kbase_device *kbdev)
 			continue;
 
 		if (check_sync_update_for_on_slot_group(group)) {
-			/* SYNC_UPDATE event shall invalidate GPU idle event */
-			atomic_set(&scheduler->gpu_no_longer_idle, true);
 			scheduler_wakeup(kbdev, true);
 			return;
 		}
