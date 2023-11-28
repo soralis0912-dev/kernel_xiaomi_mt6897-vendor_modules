@@ -3030,9 +3030,18 @@ int kbase_csf_wait_protected_mode_enter(struct kbase_device *kbdev)
 {
 	int err;
 
+	/* set fw timeout to 2s */
+	kbdev->csf.fw_timeout_ms =
+		kbase_get_timeout_ms(kbdev, CSF_FIRMWARE_TIMEOUT_ON_PMODE_ENTRY);
+
 	lockdep_assert_held(&kbdev->mmu_hw_mutex);
 
+
 	err = wait_for_global_request(kbdev, GLB_REQ_PROTM_ENTER_MASK);
+
+	/* restore */
+        kbdev->csf.fw_timeout_ms =
+                kbase_get_timeout_ms(kbdev, CSF_FIRMWARE_TIMEOUT);
 
 	if (!err) {
 #define WAIT_TIMEOUT 5000 /* 50ms timeout */

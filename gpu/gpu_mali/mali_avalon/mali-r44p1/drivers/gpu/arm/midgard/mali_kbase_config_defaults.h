@@ -224,6 +224,12 @@ enum {
  */
 #define CSF_FIRMWARE_PING_TIMEOUT_CYCLES (600000000ull)
 
+/* Waiting timeout for a pmode_enter request to be acknowledged, in clock cycles.
+ *
+ * Based on 2000ms timeout at 100MHz, scaled from a 50MHz GPU system.
+ */
+#define CSF_FIRMWARE_TIMEOUT_ON_PMODE_ENTRY_CYCLES (200000000ull)
+
 /* Waiting timeout for a KCPU queue's fence signal blocked to long, in clock cycles.
  *
  * Based on 10s timeout at 100MHz, scaled from a 50MHz GPU system.
