@@ -26,6 +26,9 @@
 #include <linux/of.h>
 #include <linux/clk.h>
 #include <linux/devfreq.h>
+#if IS_ENABLED(CONFIG_MALI_MTK_DEVFREQ_GOVERNOR) && IS_ENABLED(CONFIG_MTK_GPUFREQ_V2)
+#include <mtk_gpufreq.h>
+#endif
 #if IS_ENABLED(CONFIG_DEVFREQ_THERMAL)
 #include <linux/devfreq_cooling.h>
 #endif
@@ -685,7 +688,11 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 	if (dp->max_state > 0) {
 		/* Record the maximum frequency possible */
 		kbdev->gpu_props.props.core_props.gpu_freq_khz_max =
+#if IS_ENABLED(CONFIG_MALI_MTK_DEVFREQ_GOVERNOR) && IS_ENABLED(CONFIG_MTK_GPUFREQ_V2)
+			gpufreq_get_freq_by_idx(TARGET_DEFAULT, 0);
+#else
 			dp->freq_table[0] / 1000;
+#endif
 	}
 
 #if IS_ENABLED(CONFIG_DEVFREQ_THERMAL)
