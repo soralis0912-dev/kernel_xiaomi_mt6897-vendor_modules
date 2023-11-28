@@ -5118,6 +5118,10 @@ static bool scheduler_idle_suspendable(struct kbase_device *kbdev)
 				  kbase_pm_idle_groups_sched_suspendable(kbdev);
 		} else
 			suspend = kbase_pm_no_runnables_sched_suspendable(kbdev);
+
+		if (suspend && unlikely(atomic_read(&scheduler->gpu_no_longer_idle)))
+			suspend = false;
+
 		spin_unlock(&scheduler->interrupt_lock);
 		spin_unlock_irqrestore(&kbdev->hwaccess_lock, flags);
 
@@ -6724,6 +6728,8 @@ static void check_sync_update_in_sleep_mode(struct kbase_device *kbdev)
 			continue;
 
 		if (check_sync_update_for_on_slot_group(group)) {
+			/* SYNC_UPDATE event shall invalidate GPU idle event */
+			atomic_set(&scheduler->gpu_no_longer_idle, true);
 			scheduler_wakeup(kbdev, true);
 			return;
 		}
