@@ -1664,6 +1664,9 @@ static int kbase_pm_l2_update_state(struct kbase_device *kbdev)
 #if MALI_USE_CSF
 				backend->l2_force_off_after_mcu_halt = false;
 #endif
+#if IS_ENABLED(CONFIG_MALI_MTK_ACP_DSU_REQ)
+				mtk_platform_cpu_cache_request(kbdev, REQ_DSU_POWER_OFF);
+#endif /* CONFIG_MALI_MTK_ACP_DSU_REQ */
 				backend->l2_state = KBASE_L2_OFF;
 			}
 			break;
@@ -3628,10 +3631,6 @@ static int kbase_pm_do_reset(struct kbase_device *kbdev)
 	KBASE_KTRACE_ADD(kbdev, CORE_GPU_SOFT_RESET, NULL, 0);
 
 	KBASE_TLSTREAM_JD_GPU_SOFT_RESET(kbdev, kbdev);
-
-#if IS_ENABLED(CONFIG_MALI_MTK_ACP_DSU_REQ)
-	mtk_platform_cpu_cache_request(kbdev, REQ_DSU_POWER_ON);
-#endif /* CONFIG_MALI_MTK_ACP_DSU_REQ */
 
 #if defined(CONFIG_MTK_GPUFREQ_V2) && IS_ENABLED(CONFIG_MALI_MTK_MFG2_BACKDOOR)
 	/* wait until L2 power transition is compelted or 3ms timeout */
