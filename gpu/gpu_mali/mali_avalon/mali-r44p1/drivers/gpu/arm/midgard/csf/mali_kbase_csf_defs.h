@@ -507,9 +507,9 @@ struct kbase_protected_suspend_buffer {
  * @prepared_seq_num: Indicates the position of queue group in the list of
  *                    prepared groups to be scheduled.
  * @scan_seq_num:     Scan out sequence number before adjusting for dynamic
- *                    idle conditions. It is used for setting a group's
- *                    onslot priority. It could differ from prepared_seq_number
- *                    when there are idle groups.
+ *                    idle conditions. It represents a group's global priority
+ *                    for a running tick/tock. It could differ from
+ *                    prepared_seq_number when there are idle groups.
  * @faulted:          Indicates that a GPU fault occurred for the queue group.
  *                    This flag persists until the fault has been queued to be
  *                    reported to userspace.
@@ -540,6 +540,12 @@ struct kbase_protected_suspend_buffer {
  *                  It is accumulated on consecutive mapping attempt failures. On
  *                  reaching a preset limit, the group is regarded as suffered
  *                  a fatal error and triggers a fatal error notification.
+ * @sched_act_seq_num: Scheduling action sequence number for determine a CSG's onslot
+ *                    priority in tick/tock scheduling action. It could differ from
+ *                    scan_seq_num. The field is only meaningful if the CSG is on the
+ *                    Scheduler's schedulable list for a tick/tock, and used for
+ *                    determining the CSG slot priority when the group is to be placed
+ *                    on the CSG slot.
  */
 struct kbase_queue_group {
 	struct kbase_context *kctx;
@@ -591,6 +597,7 @@ struct kbase_queue_group {
 #endif
 	void *csg_reg;
 	u8 csg_reg_bind_retries;
+	u32 sched_act_seq_num;
 #if IS_ENABLED(CONFIG_MALI_TRACE_POWER_GPU_WORK_PERIOD)
 	/**
 	 * @prev_act: Previous CSG activity transition in a GPU metrics.
@@ -1082,6 +1089,9 @@ struct kbase_csf_mcu_shared_regions {
  *                          protected mode execution compared to other such
  *                          groups. It is updated on every tick/tock.
  *                          @interrupt_lock is used to serialize the access.
+ * @csg_scan_sched_count:   Scheduling action counter used to assign the sched_act_seq_num
+ *                          for each group added to Scheduler's schedulable list in a
+ *                          tick/tock.
  * @protm_enter_time:       GPU protected mode enter time.
  * @reclaim_mgr:            CSGs tiler heap manager object.
  * @mcu_regs_data:          Scheduler MCU shared regions data for managing the
@@ -1135,6 +1145,7 @@ struct kbase_csf_scheduler {
 	u32 pm_active_count;
 	unsigned int csg_scheduling_period_ms;
 	u32 tick_protm_pending_seq;
+	u32 csg_scan_sched_count;
 	ktime_t protm_enter_time;
 	struct kbase_csf_sched_heap_reclaim_mgr reclaim_mgr;
 	struct kbase_csf_mcu_shared_regions mcu_regs_data;

@@ -3513,9 +3513,9 @@ static inline void count_active_address_space(struct kbase_device *kbdev,
  * priority of a slot belonging to a higher priority idle group will always be
  * greater than the priority of a slot belonging to a lower priority non-idle
  * group, reflecting the original position of a group in the scan order (i.e
- * static priority) 'scan_seq_num', which is set during the prepare phase of a
- * tick/tock before the group is moved to 'idle_groups_to_schedule' list if it
- * is idle.
+ * static priority) 'sched_act_seq_num', which is set during the prepare phase
+ * of a tick/tock before the group is moved to 'idle_groups_to_schedule' list if
+ * it is idle.
  * The priority range [MAX_CSG_SLOT_PRIORITY, 0] is partitioned with the first
  * 'slots_for_tick' groups in the original scan order are assigned a priority in
  * the subrange [MAX_CSG_SLOT_PRIORITY, MAX_CSG_SLOT_PRIORITY - slots_for_tick),
@@ -3541,9 +3541,9 @@ static u8 get_slot_priority(struct kbase_queue_group *group)
 		slot_prio = (u8)(MAX_CSG_SLOT_PRIORITY - used_slots);
 	} else {
 		/* There will be a mix of idle and non-idle groups. */
-		if (group->scan_seq_num < slots_for_tick)
+		if (group->sched_act_seq_num < slots_for_tick)
 			slot_prio = (u8)(MAX_CSG_SLOT_PRIORITY -
-					 group->scan_seq_num);
+					 group->sched_act_seq_num);
 		else if (MAX_CSG_SLOT_PRIORITY > (slots_for_tick + used_slots))
 			slot_prio = (u8)(MAX_CSG_SLOT_PRIORITY - (slots_for_tick + used_slots));
 		else
@@ -4532,6 +4532,34 @@ static void scheduler_apply(struct kbase_device *kbdev)
 	program_suspending_csg_slots(kbdev);
 }
 
+/**
+ * scheduler_scan_add_group_to_sched_list - Add a schedulable group to one of the scheduler's
+ *                                          schedulable lists following exactly the scan sequence.
+ *
+ * @kbdev:      Pointer to the GPU device.
+ * @sched_list: the scheduling list for appending the given group
+ * @group:      the group that is to be added following the scan out procedure.
+ *
+ * This function is called when a group is required to be added to a scheduler maintained list
+ * for a tick/tock scheduling operation.
+ */
+static void scheduler_scan_add_group_to_sched_list(struct kbase_device *kbdev,
+						   struct list_head *sched_list,
+						   struct kbase_queue_group *group)
+{
+	struct kbase_csf_scheduler *scheduler = &kbdev->csf.scheduler;
+
+	lockdep_assert_held(&scheduler->lock);
+	lockdep_assert_held(&scheduler->interrupt_lock);
+
+	list_add_tail(&group->link_to_schedule, sched_list);
+	/* Set the act_seq_num when a group is added to a schedulable list.
+	 * Otherwise it's a don't care case, as the group would not be involved
+	 * with onslot running.
+	 */
+	group->sched_act_seq_num = scheduler->csg_scan_sched_count++;
+}
+
 static void scheduler_ctx_scan_groups(struct kbase_device *kbdev, struct kbase_context *kctx,
 				      int priority, struct list_head *privileged_groups,
 				      struct list_head *active_groups)
@@ -4574,17 +4602,17 @@ static void scheduler_ctx_scan_groups(struct kbase_device *kbdev, struct kbase_c
 			update_idle_protm_group_state_to_runnable(group);
 		else if (queue_group_idle_locked(group)) {
 			if (can_schedule_idle_group(group))
-				list_add_tail(&group->link_to_schedule,
-					&scheduler->idle_groups_to_schedule);
+				scheduler_scan_add_group_to_sched_list(
+					kbdev, &scheduler->idle_groups_to_schedule, group);
 			continue;
 		}
 
 		if (protm_req && (group->priority == KBASE_QUEUE_GROUP_PRIORITY_REALTIME)) {
-			list_add_tail(&group->link_to_schedule, privileged_groups);
+			scheduler_scan_add_group_to_sched_list(kbdev, privileged_groups, group);
 			continue;
 		}
 
-		list_add_tail(&group->link_to_schedule, active_groups);
+		scheduler_scan_add_group_to_sched_list(kbdev, active_groups, group);
 	}
 }
 
@@ -5302,6 +5330,7 @@ static int scheduler_prepare(struct kbase_device *kbdev)
 	WARN_ON(!list_empty(&scheduler->idle_groups_to_schedule));
 	scheduler->num_active_address_spaces = 0;
 	scheduler->num_csg_slots_for_tick = 0;
+	scheduler->csg_scan_sched_count = 0;
 	bitmap_zero(scheduler->csg_slots_prio_update, MAX_SUPPORTED_CSGS);
 	INIT_LIST_HEAD(&privileged_groups);
 	INIT_LIST_HEAD(&active_groups);
