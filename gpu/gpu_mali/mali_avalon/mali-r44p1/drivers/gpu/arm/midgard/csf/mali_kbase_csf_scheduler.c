@@ -773,7 +773,8 @@ void kbase_csf_scheduler_process_gpu_idle_event(struct kbase_device *kbdev)
 	lockdep_assert_held(&scheduler->interrupt_lock);
 
 	non_idle_offslot_grps = atomic_read(&scheduler->non_idle_offslot_grps);
-	can_suspend_on_idle = kbase_pm_idle_groups_sched_suspendable(kbdev);
+	can_suspend_on_idle = kbase_pm_idle_groups_sched_suspendable(kbdev) &&
+					!kbase_pm_is_mcu_inactive(kbdev, kbdev->pm.backend.mcu_state);
 	KBASE_KTRACE_ADD(kbdev, SCHEDULER_GPU_IDLE_EVENT_CAN_SUSPEND, NULL,
 			 ((u64)(u32)non_idle_offslot_grps) | (((u64)can_suspend_on_idle) << 32));
 
