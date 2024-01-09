@@ -729,6 +729,7 @@ void kbase_mmu_report_fault_and_kill(struct kbase_context *kctx,
 	mtk_common_debug(MTK_COMMON_DBG_DUMP_PM_STATUS, -1, MTK_DBG_HOOK_MMU_UNHANDLEDPAGEFAULT);
 	mtk_common_debug(MTK_COMMON_DBG_DUMP_INFRA_STATUS, -1, MTK_DBG_HOOK_MMU_UNHANDLEDPAGEFAULT);
 	mtk_common_debug(MTK_COMMON_DBG_DUMP_DB_BY_SETTING, kctx->pid, MTK_DBG_HOOK_MMU_UNHANDLEDPAGEFAULT);
+	mtk_common_debug(MTK_COMMON_DBG_CSF_DUMP_GROUPS_QUEUES, kctx->tgid, MTK_DBG_HOOK_MMU_UNHANDLEDPAGEFAULT);
 #endif /* CONFIG_MALI_MTK_DEBUG */
 
 	/* AS transaction begin */
