@@ -52,9 +52,7 @@ static DEFINE_SPINLOCK(kbase_csf_fence_lock);
 #include <platform/mtk_platform_common/mtk_platform_qinspect_recovery.h>
 #endif /* CONFIG_MALI_MTK_CROSS_QUEUE_SYNC_RECOVERY */
 
-#ifdef CONFIG_MALI_FENCE_DEBUG
 #define FENCE_WAIT_TIMEOUT_MS 3000
-#endif
 
 #if IS_ENABLED(CONFIG_MALI_MTK_FENCE_DEBUG)
 #define COMMAND_TIMEOUT_MS 10000
@@ -1420,8 +1418,6 @@ static void pending_cmds_timer_callback(struct timer_list *timer)
 }
 #endif /* CONFIG_MALI_MTK_FENCE_DEBUG */
 
-#ifdef CONFIG_MALI_FENCE_DEBUG
-
 #if IS_ENABLED(CONFIG_MALI_MTK_FENCE_DEBUG)
 static void fence_wait_timeout_start(struct kbase_kcpu_command_queue *cmd);
 #endif /* CONFIG_MALI_MTK_FENCE_DEBUG */
@@ -1579,7 +1575,6 @@ static void fence_wait_timeout_start(struct kbase_kcpu_command_queue *cmd)
 {
 	mod_timer(&cmd->fence_timeout, jiffies + msecs_to_jiffies(FENCE_WAIT_TIMEOUT_MS));
 }
-#endif
 
 /**
  * kbase_kcpu_fence_wait_process() - Process the kcpu fence wait command
@@ -1624,9 +1619,8 @@ static int kbase_kcpu_fence_wait_process(
 		fence_status = cb_err;
 		if (cb_err == 0) {
 			kcpu_queue->fence_wait_processed = true;
-#ifdef CONFIG_MALI_FENCE_DEBUG
-			fence_wait_timeout_start(kcpu_queue);
-#endif
+			if (IS_ENABLED(CONFIG_MALI_FENCE_DEBUG))
+				fence_wait_timeout_start(kcpu_queue);
 		} else if (cb_err == -ENOENT) {
 			fence_status = dma_fence_get_status(fence);
 			if (!fence_status) {
@@ -3148,16 +3142,50 @@ int kbase_csf_kcpu_queue_delete(struct kbase_context *kctx,
 	return delete_queue(kctx, (u32)del->id);
 }
 
-int kbase_csf_kcpu_queue_new(struct kbase_context *kctx,
-			struct kbase_ioctl_kcpu_queue_new *newq)
+static struct kbase_kcpu_dma_fence_meta *
+kbase_csf_kcpu_queue_metadata_new(struct kbase_context *kctx, u64 fence_context)
+{
+	int n;
+	struct kbase_kcpu_dma_fence_meta *metadata = kzalloc(sizeof(*metadata), GFP_KERNEL);
+
+	if (!metadata)
+		goto early_ret;
+
+	*metadata = (struct kbase_kcpu_dma_fence_meta){
+		.kbdev = kctx->kbdev,
+		.kctx_id = kctx->id,
+	};
+
+	/* Please update MAX_TIMELINE_NAME macro when making changes to the string. */
+	n = snprintf(metadata->timeline_name, MAX_TIMELINE_NAME, "%u-%d_%u-%llu-kcpu",
+		     kctx->kbdev->id, kctx->tgid, kctx->id, fence_context);
+	if (WARN_ON(n >= MAX_TIMELINE_NAME)) {
+#if IS_ENABLED(CONFIG_MALI_MTK_CREATE_KCPU_QUEUE_DEBUG)
+		dev_warn(kctx->kbdev->dev, "%s: Invalid timeline name length : %d exceed limit %d",
+			__func__, n, MAX_TIMELINE_NAME);
+#if IS_ENABLED(CONFIG_MALI_MTK_LOG_BUFFER)
+		mtk_logbuffer_type_print(kctx->kbdev, MTK_LOGBUFFER_TYPE_CRITICAL | MTK_LOGBUFFER_TYPE_EXCEPTION,
+			"%s: Invalid timeline name length : %d exceed limit %d",
+			__func__, n, MAX_TIMELINE_NAME);
+#endif /* CONFIG_MALI_MTK_LOG_BUFFER */
+#endif
+		kfree(metadata);
+		metadata = NULL;
+		goto early_ret;
+	}
+
+	kbase_refcount_set(&metadata->refcount, 1);
+
+early_ret:
+	return metadata;
+}
+
+int kbase_csf_kcpu_queue_new(struct kbase_context *kctx, struct kbase_ioctl_kcpu_queue_new *newq)
 {
 	struct kbase_kcpu_command_queue *queue;
-	int idx;
-	int n;
-	int ret = 0;
-#if IS_ENABLED(CONFIG_SYNC_FILE)
 	struct kbase_kcpu_dma_fence_meta *metadata;
-#endif
+	int idx;
+	int ret = 0;
 	/* The queue id is of u8 type and we use the index of the kcpu_queues
 	 * array as an id, so the number of elements in the array can't be
 	 * more than 256.
@@ -3210,6 +3238,16 @@ int kbase_csf_kcpu_queue_new(struct kbase_context *kctx,
 		goto out;
 	}
 
+	*queue = (struct kbase_kcpu_command_queue)
+	{
+		.kctx = kctx, .start_offset = 0, .num_pending_cmds = 0, .enqueue_failed = false,
+		.command_started = false, .has_error = false, .id = idx,
+#if IS_ENABLED(CONFIG_SYNC_FILE)
+		.fence_context = dma_fence_context_alloc(1), .fence_seqno = 0,
+		.fence_wait_processed = false,
+#endif /* IS_ENABLED(CONFIG_SYNC_FILE) */
+	};
+
 	queue->wq = alloc_workqueue("mali_kbase_csf_kcpu_wq_%i", WQ_UNBOUND | WQ_HIGHPRI, 0, idx);
 	if (queue->wq == NULL) {
 #if IS_ENABLED(CONFIG_MALI_MTK_CREATE_KCPU_QUEUE_DEBUG)
@@ -3225,66 +3263,39 @@ int kbase_csf_kcpu_queue_new(struct kbase_context *kctx,
 		goto out;
 	}
 
-	bitmap_set(kctx->csf.kcpu_queues.in_use, idx, 1);
-	kctx->csf.kcpu_queues.array[idx] = queue;
 	mutex_init(&queue->lock);
-	queue->kctx = kctx;
-	queue->start_offset = 0;
-	queue->num_pending_cmds = 0;
-#if IS_ENABLED(CONFIG_SYNC_FILE)
-	queue->fence_context = dma_fence_context_alloc(1);
-	queue->fence_seqno = 0;
-	queue->fence_wait_processed = false;
-
-	metadata = kzalloc(sizeof(*metadata), GFP_KERNEL);
-	if (!metadata) {
-#if IS_ENABLED(CONFIG_MALI_MTK_CREATE_KCPU_QUEUE_DEBUG)
-		dev_warn(kctx->kbdev->dev, "%s: Allocate metadata (size=%zu) failed", __func__, sizeof(*metadata));
-#if IS_ENABLED(CONFIG_MALI_MTK_LOG_BUFFER)
-		mtk_logbuffer_type_print(kctx->kbdev, MTK_LOGBUFFER_TYPE_CRITICAL | MTK_LOGBUFFER_TYPE_EXCEPTION,
-			"%s: Allocate metadata (size=%zu) failed", __func__, sizeof(*metadata));
-#endif /* CONFIG_MALI_MTK_LOG_BUFFER */
-#endif
-		destroy_workqueue(queue->wq);
-		kfree(queue);
-		ret = -ENOMEM;
-		goto out;
-	}
-
-	metadata->kbdev = kctx->kbdev;
-	metadata->kctx_id = kctx->id;
-	n = snprintf(metadata->timeline_name, MAX_TIMELINE_NAME, "%d-%d_%d-%lld-kcpu",
-		     kctx->kbdev->id, kctx->tgid, kctx->id, queue->fence_context);
-	if (WARN_ON(n >= MAX_TIMELINE_NAME)) {
-#if IS_ENABLED(CONFIG_MALI_MTK_CREATE_KCPU_QUEUE_DEBUG)
-		dev_warn(kctx->kbdev->dev, "%s: Invalid timeline name length : %d exceed limit %d",
-			__func__, n, MAX_TIMELINE_NAME);
-#if IS_ENABLED(CONFIG_MALI_MTK_LOG_BUFFER)
-		mtk_logbuffer_type_print(kctx->kbdev, MTK_LOGBUFFER_TYPE_CRITICAL | MTK_LOGBUFFER_TYPE_EXCEPTION,
-			"%s: Invalid timeline name length : %d exceed limit %d",
-			__func__, n, MAX_TIMELINE_NAME);
-#endif /* CONFIG_MALI_MTK_LOG_BUFFER */
-#endif
-		dev_err(kctx->kbdev->dev, "%s: ivalid name", __func__);
-		destroy_workqueue(queue->wq);
-		kfree(queue);
-		kfree(metadata);
-		ret = -EINVAL;
-		goto out;
-	}
-
-	kbase_refcount_set(&metadata->refcount, 1);
-	queue->metadata = metadata;
-	atomic_inc(&kctx->kbdev->live_fence_metadata);
-#endif /* CONFIG_SYNC_FILE */
-	queue->enqueue_failed = false;
-	queue->command_started = false;
-	INIT_LIST_HEAD(&queue->jit_blocked);
-	queue->has_error = false;
 	INIT_WORK(&queue->work, kcpu_queue_process_worker);
 	INIT_WORK(&queue->timeout_work, kcpu_queue_timeout_worker);
-	queue->id = idx;
+	INIT_LIST_HEAD(&queue->jit_blocked);
 
+	if (IS_ENABLED(CONFIG_SYNC_FILE)) {
+		metadata = kbase_csf_kcpu_queue_metadata_new(kctx, queue->fence_context);
+
+		if (!metadata) {
+#if IS_ENABLED(CONFIG_MALI_MTK_CREATE_KCPU_QUEUE_DEBUG)
+			dev_warn(kctx->kbdev->dev, "%s: Allocate metadata (size=%zu) failed", __func__, sizeof(*metadata));
+#if IS_ENABLED(CONFIG_MALI_MTK_LOG_BUFFER)
+			mtk_logbuffer_type_print(kctx->kbdev, MTK_LOGBUFFER_TYPE_CRITICAL | MTK_LOGBUFFER_TYPE_EXCEPTION,
+				"%s: Allocate metadata (size=%zu) failed", __func__, sizeof(*metadata));
+#endif /* CONFIG_MALI_MTK_LOG_BUFFER */
+#endif
+			destroy_workqueue(queue->wq);
+			kfree(queue);
+			ret = -ENOMEM;
+			goto out;
+		}
+
+		queue->metadata = metadata;
+		atomic_inc(&kctx->kbdev->live_fence_metadata);
+		atomic_set(&queue->fence_signal_pending_cnt, 0);
+		kbase_timer_setup(&queue->fence_signal_timeout, fence_signal_timeout_cb);
+	}
+
+	if (IS_ENABLED(CONFIG_MALI_FENCE_DEBUG))
+		kbase_timer_setup(&queue->fence_timeout, fence_timeout_callback);
+
+	bitmap_set(kctx->csf.kcpu_queues.in_use, (unsigned int)idx, 1);
+	kctx->csf.kcpu_queues.array[idx] = queue;
 	newq->id = idx;
 
 	/* Fire the tracepoint with the mutex held to enforce correct ordering
@@ -3293,16 +3304,7 @@ int kbase_csf_kcpu_queue_new(struct kbase_context *kctx,
 	KBASE_TLSTREAM_TL_KBASE_NEW_KCPUQUEUE(kctx->kbdev, queue, queue->id, kctx->id,
 					      queue->num_pending_cmds);
 
-	KBASE_KTRACE_ADD_CSF_KCPU(kctx->kbdev, KCPU_QUEUE_CREATE, queue,
-		queue->fence_context, 0);
-#ifdef CONFIG_MALI_FENCE_DEBUG
-	kbase_timer_setup(&queue->fence_timeout, fence_timeout_callback);
-#endif
-
-#if IS_ENABLED(CONFIG_SYNC_FILE)
-	atomic_set(&queue->fence_signal_pending_cnt, 0);
-	kbase_timer_setup(&queue->fence_signal_timeout, fence_signal_timeout_cb);
-#endif
+	KBASE_KTRACE_ADD_CSF_KCPU(kctx->kbdev, KCPU_QUEUE_CREATE, queue, queue->fence_context, 0);
 
 #if IS_ENABLED(CONFIG_MALI_MTK_FENCE_DEBUG)
 	queue->cmds_timeout_wq = alloc_workqueue("mali_kbase_csf_kcpu_cmds_timeout_wq_%i", WQ_UNBOUND | WQ_HIGHPRI, 0, idx);
