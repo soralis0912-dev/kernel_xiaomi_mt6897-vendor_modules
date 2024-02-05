@@ -741,7 +741,7 @@ static int do_dma_buf_te_ioctl_fill(struct dma_buf_te_ioctl_fill __user *arg)
 
 	struct dma_buf *dmabuf;
 	struct dma_buf_te_ioctl_fill f;
-	int ret;
+	int ret = -EINVAL;
 
 	if (copy_from_user(&f, arg, sizeof(f)))
 		return -EFAULT;
@@ -750,7 +750,13 @@ static int do_dma_buf_te_ioctl_fill(struct dma_buf_te_ioctl_fill __user *arg)
 	if (IS_ERR_OR_NULL(dmabuf))
 		return -EINVAL;
 
+	/* verify it's one of ours */
+	if (dmabuf->ops != &dma_buf_te_ops)
+		goto err_have_dmabuf;
+
 	ret = dma_te_buf_fill(dmabuf, f.value);
+
+err_have_dmabuf:
 	dma_buf_put(dmabuf);
 
 	return ret;
