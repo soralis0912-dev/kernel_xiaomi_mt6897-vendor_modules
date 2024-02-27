@@ -2351,9 +2351,9 @@ void kbase_mem_shrink_cpu_mapping(struct kbase_context *kctx,
 		/* Nothing to do */
 		return;
 
-	unmap_mapping_range(kctx->kfile->filp->f_inode->i_mapping,
-			(gpu_va_start + new_pages)<<PAGE_SHIFT,
-			(old_pages - new_pages)<<PAGE_SHIFT, 1);
+	unmap_mapping_range(kctx->filp->f_inode->i_mapping,
+			    (loff_t)(gpu_va_start + new_pages) << PAGE_SHIFT,
+			    (loff_t)(old_pages - new_pages) << PAGE_SHIFT, 1);
 }
 
 int kbase_mem_shrink_gpu_mapping(struct kbase_context *const kctx,
@@ -2598,7 +2598,6 @@ static void kbase_cpu_vm_close(struct vm_area_struct *vma)
 	kbase_gpu_vm_unlock(map->kctx);
 
 	kbase_mem_phy_alloc_put(map->alloc);
-	kbase_file_dec_cpu_mapping_count(map->kctx->kfile);
 	kfree(map);
 }
 
@@ -2808,7 +2807,6 @@ static int kbase_cpu_mmap(struct kbase_context *kctx,
 		map->alloc->properties |= KBASE_MEM_PHY_ALLOC_ACCESSED_CACHED;
 
 	list_add(&map->mappings_list, &map->alloc->mappings);
-	kbase_file_inc_cpu_mapping_count(kctx->kfile);
 
  out:
 	return err;
@@ -3551,25 +3549,6 @@ void kbasep_os_process_page_usage_update(struct kbase_context *kctx, int pages)
 #endif
 }
 
-static void kbase_special_vm_open(struct vm_area_struct *vma)
-{
-	struct kbase_context *kctx = vma->vm_private_data;
-
-	kbase_file_inc_cpu_mapping_count(kctx->kfile);
-}
-
-static void kbase_special_vm_close(struct vm_area_struct *vma)
-{
-	struct kbase_context *kctx = vma->vm_private_data;
-
-	kbase_file_dec_cpu_mapping_count(kctx->kfile);
-}
-
-static const struct vm_operations_struct kbase_vm_special_ops = {
-	.open = kbase_special_vm_open,
-	.close = kbase_special_vm_close,
-};
-
 static int kbase_tracking_page_setup(struct kbase_context *kctx, struct vm_area_struct *vma)
 {
 	if (vma_pages(vma) != 1)
@@ -3578,10 +3557,7 @@ static int kbase_tracking_page_setup(struct kbase_context *kctx, struct vm_area_
 	/* no real access */
 	vm_flags_clear(vma, VM_READ | VM_MAYREAD | VM_WRITE | VM_MAYWRITE | VM_EXEC | VM_MAYEXEC);
 	vm_flags_set(vma, VM_DONTCOPY | VM_DONTEXPAND | VM_DONTDUMP | VM_IO);
-	vma->vm_ops = &kbase_vm_special_ops;
-	vma->vm_private_data = kctx;
 
-	kbase_file_inc_cpu_mapping_count(kctx->kfile);
 	return 0;
 }
 
@@ -3636,7 +3612,6 @@ static void kbase_csf_user_io_pages_vm_close(struct vm_area_struct *vma)
 	struct kbase_device *kbdev;
 	int err;
 	bool reset_prevented = false;
-	struct kbase_file *kfile;
 
 	if (!queue) {
 		pr_debug("Close method called for the new User IO pages mapping vma\n");
@@ -3645,7 +3620,6 @@ static void kbase_csf_user_io_pages_vm_close(struct vm_area_struct *vma)
 
 	kctx = queue->kctx;
 	kbdev = kctx->kbdev;
-	kfile = kctx->kfile;
 
 	err = kbase_reset_gpu_prevent_and_wait(kbdev);
 	if (err)
@@ -3663,9 +3637,8 @@ static void kbase_csf_user_io_pages_vm_close(struct vm_area_struct *vma)
 	if (reset_prevented)
 		kbase_reset_gpu_allow(kbdev);
 
-	kbase_file_dec_cpu_mapping_count(kfile);
 	/* Now as the vma is closed, drop the reference on mali device file */
-	fput(kfile->filp);
+	fput(kctx->filp);
 }
 
 #if (KERNEL_VERSION(4, 11, 0) > LINUX_VERSION_CODE)
@@ -3818,7 +3791,6 @@ static int kbase_csf_cpu_mmap_user_io_pages(struct kbase_context *kctx,
 	/* Also adjust the vm_pgoff */
 	vma->vm_pgoff = queue->db_file_offset;
 
-	kbase_file_inc_cpu_mapping_count(kctx->kfile);
 	return 0;
 
 map_failed:
@@ -3858,7 +3830,6 @@ static void kbase_csf_user_reg_vm_close(struct vm_area_struct *vma)
 {
 	struct kbase_context *kctx = vma->vm_private_data;
 	struct kbase_device *kbdev;
-	struct kbase_file *kfile;
 
 	if (unlikely(!kctx)) {
 		pr_debug("Close function called for the unexpected mapping");
@@ -3866,7 +3837,6 @@ static void kbase_csf_user_reg_vm_close(struct vm_area_struct *vma)
 	}
 
 	kbdev = kctx->kbdev;
-	kfile = kctx->kfile;
 
 	if (unlikely(!kctx->csf.user_reg.vma))
 		dev_warn(kbdev->dev, "user_reg VMA pointer unexpectedly NULL for ctx %d_%d",
@@ -3878,9 +3848,8 @@ static void kbase_csf_user_reg_vm_close(struct vm_area_struct *vma)
 
 	kctx->csf.user_reg.vma = NULL;
 
-	kbase_file_dec_cpu_mapping_count(kfile);
 	/* Now as the VMA is closed, drop the reference on mali device file */
-	fput(kfile->filp);
+	fput(kctx->filp);
 }
 
 /**
@@ -4010,7 +3979,6 @@ static int kbase_csf_cpu_mmap_user_reg_page(struct kbase_context *kctx,
 	vma->vm_ops = &kbase_csf_user_reg_vm_ops;
 	vma->vm_private_data = kctx;
 
-	kbase_file_inc_cpu_mapping_count(kctx->kfile);
 	return 0;
 }
 

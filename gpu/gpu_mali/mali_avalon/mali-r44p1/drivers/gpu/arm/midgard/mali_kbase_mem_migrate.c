@@ -294,7 +294,7 @@ static int kbasep_migrate_page_allocated_mapped(struct page *old_page, struct pa
 	kbase_gpu_vm_lock(kctx);
 
 	/* Unmap the old physical range. */
-	unmap_mapping_range(kctx->kfile->filp->f_inode->i_mapping,
+	unmap_mapping_range(kctx->filp->f_inode->i_mapping,
 			    page_md->data.mapped.vpfn << PAGE_SHIFT,
 			    PAGE_SIZE, 1);
 

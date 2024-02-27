@@ -90,10 +90,14 @@
  * - Restrict child process from doing supported file operations (like mmap, ioctl,
  *   read, poll) on the file descriptor of mali device file that was inherited
  *   from the parent process.
+ * 1.21:
+ * - Re-allow child process to do supported file operations (like mmap, ioctl
+ *   read, poll) on the file descriptor of mali device that was inherited
+ *   from the parent process.
  */
 
 #define BASE_UK_VERSION_MAJOR 1
-#define BASE_UK_VERSION_MINOR 20
+#define BASE_UK_VERSION_MINOR 21
 
 /**
  * struct kbase_ioctl_version_check - Check version compatibility between

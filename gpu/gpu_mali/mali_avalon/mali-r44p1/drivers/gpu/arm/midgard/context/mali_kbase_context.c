@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
 /*
  *
- * (C) COPYRIGHT 2019-2023 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2019-2024 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -143,7 +143,7 @@ int kbase_context_common_init(struct kbase_context *kctx)
 	kctx->pid = current->pid;
 
 	/* Check if this is a Userspace created context */
-	if (likely(kctx->kfile)) {
+	if (likely(kctx->filp)) {
 		struct pid *pid_struct;
 
 		rcu_read_lock();
@@ -190,6 +190,7 @@ int kbase_context_common_init(struct kbase_context *kctx)
 	spin_lock_init(&kctx->waiting_soft_jobs_lock);
 	INIT_LIST_HEAD(&kctx->waiting_soft_jobs);
 
+	init_waitqueue_head(&kctx->event_queue);
 	atomic_set(&kctx->event_count, 0);
 
 #if !MALI_USE_CSF
@@ -214,9 +215,8 @@ int kbase_context_common_init(struct kbase_context *kctx)
 	err = kbase_insert_kctx_to_process(kctx);
 	mutex_unlock(&kctx->kbdev->kctx_list_lock);
 	if (err) {
-		dev_err(kctx->kbdev->dev,
-			"(err:%d) failed to insert kctx to kbase_process", err);
-		if (likely(kctx->kfile)) {
+		dev_err(kctx->kbdev->dev, "(err:%d) failed to insert kctx to kbase_process", err);
+		if (likely(kctx->filp)) {
 			mmdrop(kctx->process_mm);
 			put_task_struct(kctx->task);
 		}
@@ -305,7 +305,7 @@ void kbase_context_common_term(struct kbase_context *kctx)
 	kbase_remove_kctx_from_process(kctx);
 	mutex_unlock(&kctx->kbdev->kctx_list_lock);
 
-	if (likely(kctx->kfile)) {
+	if (likely(kctx->filp)) {
 		mmdrop(kctx->process_mm);
 		put_task_struct(kctx->task);
 	}
