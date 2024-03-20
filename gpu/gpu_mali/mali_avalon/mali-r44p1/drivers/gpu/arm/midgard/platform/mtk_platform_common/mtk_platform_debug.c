@@ -2233,8 +2233,8 @@ void mtk_debug_csf_dump_groups_and_queues(struct kbase_device *kbdev, int pid)
 			mutex_unlock(&kbdev->kctx_list_lock);
 			break;
 		}
-		ret = mtk_debug_trylock(&kctx->csf.lock);
 		mutex_unlock(&kbdev->kctx_list_lock);
+		ret = mtk_debug_trylock(&kctx->csf.lock);
 		if (!ret) {
 			mtk_log_critical_exception(kbdev, true,
 				"[%d_%d] %s lock csf.lock failed!", kctx->tgid, kctx->id, __func__);
@@ -2290,6 +2290,13 @@ void mtk_debug_csf_dump_groups_and_queues(struct kbase_device *kbdev, int pid)
 		}
 
 		/* dump groups */
+		if (!mtk_debug_trylock(&kbdev->kctx_list_lock)) {
+			mtk_log_critical_exception(kbdev, true, "%s lock kctx_list_lock failed!", __func__);
+			mutex_unlock(&kbdev->csf.scheduler.lock);
+			mutex_unlock(&kctx->csf.lock);
+			break;
+		}
+
 		/* previous locks: kctx->csf.lock, csf.scheduler.lock */
 		list_for_each_entry(kctx_dump, &kbdev->kctx_list, kctx_list_link) {
 			u32 gr;
@@ -2325,6 +2332,7 @@ void mtk_debug_csf_dump_groups_and_queues(struct kbase_device *kbdev, int pid)
 			if (kctx_dump != kctx)
 				mutex_unlock(&kctx_dump->csf.lock);
 		}
+		mutex_unlock(&kbdev->kctx_list_lock);
 
 		/* unlock csf.scheduler.lock */
 		/* previous locks: kctx->csf.lock, csf.scheduler.lock */
