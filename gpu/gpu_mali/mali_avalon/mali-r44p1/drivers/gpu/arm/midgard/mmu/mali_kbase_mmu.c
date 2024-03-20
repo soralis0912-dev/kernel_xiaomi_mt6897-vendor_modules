@@ -1796,7 +1796,8 @@ next:
 	 * going to happen to these pages at this stage. They might return
 	 * movable once they are returned to a memory pool.
 	 */
-	if (kbase_is_page_migration_enabled() && !ignore_page_migration && phys) {
+	if (kbase_is_page_migration_enabled() && !ignore_page_migration && phys &&
+	    !is_huge(*phys) && !is_partial(*phys)) {
 		const u64 num_pages = to_vpfn - from_vpfn;
 		u64 i;
 
