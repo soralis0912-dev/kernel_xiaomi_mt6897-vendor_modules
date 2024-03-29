@@ -879,6 +879,7 @@ __attribute__((unused)) static const enum base_hw_issue base_hw_issues_tTUx_r1p3
 #if defined(CONFIG_GPU_MT6878) //mtk modified, only for mt6878
 	BASE_HW_ISSUE_TITANHW_2922,
 #endif
+	BASE_HW_ISSUE_TITANHW_2938,
 	BASE_HW_ISSUE_END
 };
 
